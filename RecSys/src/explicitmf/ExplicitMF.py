@@ -1,4 +1,7 @@
+import numpy
 from numpy.linalg import solve
+from sklearn.metrics import mean_squared_error as mse
+
 
 class ExplicitMF():
     def __init__(self, ratings, iterations=[10], n_factors=40, item_reg=0.0, user_reg=0.0, verbose=False):
@@ -39,14 +42,14 @@ class ExplicitMF():
         if type == 'user':
             # Precompute
             YTY = fixed_vecs.T.dot(fixed_vecs)
-            lambdaI = np.eye(YTY.shape[0]) * _lambda
+            lambdaI = numpy.eye(YTY.shape[0]) * _lambda
             for u in range(latent_vectors.shape[0]):
                 latent_vectors[u, :] = solve((YTY + lambdaI), ratings[u, :].dot(fixed_vecs))
         
         elif type == 'item':
             # Precompute
             XTX = fixed_vecs.T.dot(fixed_vecs)
-            lambdaI = np.eye(XTX.shape[0]) * _lambda
+            lambdaI = numpy.eye(XTX.shape[0]) * _lambda
             for i in range(latent_vectors.shape[0]):
                 latent_vectors[i, :] = solve((XTX + lambdaI), ratings[:, i].T.dot(fixed_vecs))
 
@@ -57,8 +60,8 @@ class ExplicitMF():
     def train(self, n_iter = 10):
         """ Train model for n_iter iterations from scratch."""
         # initialize latent vectors
-        self.user_vecs = np.random.random((self.n_users, self.n_factors))
-        self.item_vecs = np.random.random((self.n_items, self.n_factors))        
+        self.user_vecs = numpy.random.random((self.n_users, self.n_factors))
+        self.item_vecs = numpy.random.random((self.n_items, self.n_factors))        
         self.partial_train(n_iter)
 
         
@@ -75,7 +78,7 @@ class ExplicitMF():
     
     def predict_all(self):
         """ Predict ratings for every user and item. """
-        predictions = np.zeros((self.user_vecs.shape[0], self.item_vecs.shape[0]))
+        predictions = numpy.zeros((self.user_vecs.shape[0], self.item_vecs.shape[0]))
         for u in range(self.user_vecs.shape[0]):
             for i in range(self.item_vecs.shape[0]):
                 predictions[u, i] = self.predict(u, i)
@@ -125,9 +128,17 @@ class ExplicitMF():
 
             predictions = self.predict_all()
 
-            self.train_mse += [get_mse(predictions, self.ratings)]
-            self.test_mse  += [get_mse(predictions, test_matrix)]
+            self.train_mse += [self.get_mse(predictions, self.ratings)]
+            self.test_mse  += [self.get_mse(predictions, test_matrix)]
             if (self._v):
                 print('Train mse: ' + str(self.train_mse[-1]))
                 print('Test mse:  ' + str(self.test_mse[-1]))
             iter_diff = n_iter
+
+            
+
+    def get_mse(self, pred, actual):
+        # calc MSE (true ratings - predicted)^2
+        pred   = pred[actual.nonzero()].flatten()
+        actual = actual[actual.nonzero()].flatten()
+        return mse(pred, actual)
