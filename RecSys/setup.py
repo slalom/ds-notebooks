@@ -2,12 +2,12 @@
 
 from distutils.core import setup
 
-setup(name='explicitmf',
-      version='1.0',
+setup(name='ExplicitMF',
+      version='1.2',
       description='Explict Matrix Factorization',
       author='CAH',
       author_email='cah@slalom.com',
       url='https://www.github.com/Intellagent/ds-notebooks/',
-      packages=['explicitfm' ],
-      package_dir={'explicitfm' : 'src/explicitmf' }
+      packages=['ExplicitMF' ],
+      package_dir={'ExplicitMF' : 'src/explicitmf' }
 )
