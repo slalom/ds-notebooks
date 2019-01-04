@@ -1,0 +1,7 @@
+boto3
+cufflinks==0.8.2
+matplotlib 
+numpy 
+plotly
+scipy
+sagemaker
