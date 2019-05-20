@@ -29,12 +29,14 @@ class Player(object):
 
 
 class DotsAndBoxesBoard():
+	# class attributes
+	TOL = 10
+	CELLSIZE = 50
+	OFFSET = 30
+	CIRCLERAD = 2
+	DOTOFFSET = OFFSET + CIRCLERAD
+		
 	def __init__(self, size_board=4):
-		self.TOL = 10
-		self.CELLSIZE = 50
-		self.OFFSET = 30
-		self.CIRCLERAD = 2
-		self.DOTOFFSET = self.OFFSET + self.CIRCLERAD
 		self.NMBR_ROWS = size_board
 		self.GAMEBOARD_SIZE = self.CELLSIZE*(self.NMBR_ROWS-1) + 2*self.OFFSET
 
@@ -42,7 +44,7 @@ class DotsAndBoxesBoard():
 		self.edge_labels = self.get_edge_labels(self.dot_center_points)
 		# should be in the game
 		self.available_edges = self.edge_labels
-		self.sequence_of_moves = ''
+		self.state_of_board = ''
 
 	def dots_center_coordinates(self):
 		return [self.CELLSIZE * i + self.OFFSET for i in range(self.NMBR_ROWS)]
@@ -64,7 +66,7 @@ class DotsAndBoxesBoard():
 		return sorted(edge_labels, key=lambda tup: tup[0])
 
 
-	def add_to_sequence_of_moves(self,move,player):
+	def add_to_state_of_board(self,move,player):
 		"""
 		move is tuple of midpoint of edge
 		mark is player 1 or player 2 - use X and O
@@ -73,7 +75,7 @@ class DotsAndBoxesBoard():
 		assert isinstance(move,tuple),"can only pass tuples to move sequencing"
 		idx_of_move = self.edge_labels.index(move)
 
-		self.sequence_of_moves += str(idx_of_move) + str(player.mark)
+		self.state_of_board += str(idx_of_move) + str(player.mark)
 		 
 		#self.game_move_sequence += str(move[0]) + str(move[1]) + str(player.mark)
 
@@ -82,17 +84,24 @@ class DotsAndBoxesBoard():
 		diffs = [abs(x - val) for val in points_list]
 		return points_list[diffs.index(min(diffs))]
 
+	def get_random_move(self):
+		moves = self.available_edges
+		if moves:
+			return moves[np.random.choice(len(moves))]
+		else:
+			return None
+
 	def over(self):
 		# The game is over when there are no available edges left
 		return (not bool(len(self.available_edges)))
 
-	def check_game_over(self, player_one, player_two):
-		total = player_one.score + player_two.score
+	# def check_game_over(self, player_one, player_two):
+	# 	total = player_one.score + player_two.score
 
-		if total == (self.NMBR_ROWS-1) * (self.NMBR_ROWS-1):
-			return True
-		else:
-			return False
+	# 	if total == (self.NMBR_ROWS-1) * (self.NMBR_ROWS-1):
+	# 		return True
+	# 	else:
+	# 		return False
 
 	def determine_winner(self, player_one, player_two):
 		if player_one.score == player_two.score:
@@ -120,7 +129,8 @@ class DotsAndBoxesBoard():
 
 
 class Game(tk.Frame):
-	def __init__(self, master, player_one, player_two, size_board=4):
+	def __init__(self, master, player_one, player_two, size_board=4,
+		         Q_learner=None, Q={}, alpha=0.3, gamma=0.9):
 		# assert size_board % 2 == 0,"cannot play game that could end in tie"
 		self.player_one = player_one
 		self.player_two = player_two
@@ -164,10 +174,34 @@ class Game(tk.Frame):
 		self.info_frame.grid(row = 1, column = 0, sticky = 'N')
 		self.grid()
 
+		self.Q_learner = Q_learner
+		if self.Q_learner:
+			self.Q = Q
+			self.alpha = alpha          # Learning rate
+			self.gamma = gamma          # Discount rate
+			self.share_Q_with_players()
+
 		# if player 1 is computer
 		print(self.turn.name)
 		if not self.turn.human:
 			self.make_computer_move()
+
+	@property
+	def Q_learn(self):
+		if self._Q_learn is not None:
+			return self._Q_learn
+		if isinstance(self.player_one, QPlayer) or isinstance(self.player_two, QPlayer):
+			return True
+
+	@Q_learn.setter
+	def Q_learn(self, _Q_learn):
+		self._Q_learn = _Q_learn
+
+	def share_Q_with_players(self):             # The action value table Q is shared with the QPlayers to help them make their move decisions
+		if isinstance(self.player_one, QPlayer):
+			self.player_one.Q = self.Q
+		if isinstance(self.player_two, QPlayer):
+			self.player_two.Q = self.Q
 
 	def create_circle(self, x, y, r):
 		"""
@@ -189,10 +223,8 @@ class Game(tk.Frame):
 		else:
 			move = (start_point[0], int((start_point[1] + end_point[1]) / 2))
 		
-		#self.available_edges.remove(move)
-		self.board.add_to_sequence_of_moves(move,self.turn)
+		self.board.add_to_state_of_board(move,self.turn)
 		self.board.available_edges.remove(move)
-		#self.board.add_to_sequence_of_moves(move,self.turn)
 
 	def on_screen_click(self, event):
 		"""
@@ -298,7 +330,7 @@ class Game(tk.Frame):
 		return line
 
 	def make_computer_move(self):
-		move = self.get_random_move()
+		move = self.board.get_random_move()
 		if move: 
 			self.apply_move_to_board(move)
 
@@ -366,14 +398,30 @@ class Game(tk.Frame):
 			self.canvas.create_text(self.board.GAMEBOARD_SIZE/2, self.board.GAMEBOARD_SIZE/2,
 				                    text="GAME OVER", font="display_font", fill="#888")
 
-	#@staticmethod
-	def get_random_move(self):
-		#print(board.available)
-		moves = self.board.available_edges
-		if moves:
-			return moves[np.random.choice(len(moves))]
+	def learn_Q(self, move):                        # If Q-learning is toggled on, "learn_Q" should be called after receiving a move from an instance of Player and before implementing the move (using Board's "place_mark" method)
+		state_key = QPlayer.make_and_maybe_add_key(self.board,self.Q)
+		self.apply_move_to_board(move)
+		reward = self.board.give_reward()
+		next_state_key = QPlayer.make_and_maybe_add_key(self.board, self.other_player.mark, self.Q)
+		if self.board.over():
+			print(self.Q)
+			expected = reward
 		else:
-			return None
+			next_Qs = self.Q[next_state_key]             # The Q values represent the expected future reward for player X for each available move in the next state (after the move has been made)
+			if self.turn.mark == "X":
+				expected = reward + (self.gamma * min(next_Qs.values()))        # If the current player is X, the next player is O, and the move with the minimum Q value should be chosen according to our "sign convention"
+			elif self.turn.mark == "O":
+				expected = reward + (self.gamma * max(next_Qs.values()))        # If the current player is O, the next player is X, and the move with the maximum Q vlue should be chosen
+				change = self.alpha * (expected - self.Q[state_key][move])
+		self.Q[state_key][move] += change
+
+	#@staticmethod
+	# def get_random_move(self):
+	# 	moves = self.board.available_edges
+	# 	if moves:
+	# 		return moves[np.random.choice(len(moves))]
+	# 	else:
+	# 		return None
 
 
 class ComputerPlayer(Player):
@@ -385,49 +433,55 @@ class HumanPlayer(Player):
     pass
 
 class QPlayer(ComputerPlayer):
-    def __init__(self, mark, Q={}, epsilon=0.2):
-        super(QPlayer, self).__init__(mark=mark)
-        self.Q = Q
-        self.epsilon = epsilon
+	def __init__(self, name,color="black",mark="X", Q={}, epsilon=0.2):
+		super(QPlayer, self).__init__(name,color=color,mark=mark)
+		self.Q = Q
+		self.epsilon = epsilon
 
-    def get_move(self, board):
-    	# With probability epsilon, choose a move at random
-    	# ("epsilon-greedy" exploration)
-        if np.random.uniform() < self.epsilon:
-            return ComputerPlayer.get_move(board)
-        else:
-            state_key = QPlayer.make_and_maybe_add_key(board, self.mark, self.Q)
-            Qs = self.Q[state_key]
+	def get_move(self, board):
+		# With probability epsilon, choose a move at random
+		# ("epsilon-greedy" exploration)
+		if np.random.uniform() < self.epsilon:
+			return board.get_random_move()
+		else:
+			state_key = QPlayer.make_and_maybe_add_key(board, self.Q)
+			Qs = self.Q[state_key]
 
-            if self.mark == "X":
-                return QPlayer.stochastic_argminmax(Qs, max)
-            elif self.mark == "O":
-                return QPlayer.stochastic_argminmax(Qs, min)
+			if self.mark == "X":
+				return QPlayer.stochastic_argminmax(Qs, max)
+			elif self.mark == "O":
+				return QPlayer.stochastic_argminmax(Qs, min)
 
-    @staticmethod
-    # Make a dictionary key for the current state (board + player turn)
-    # and if Q does not yet have it, add it to Q
-    def make_and_maybe_add_key(board, mark, Q):
-    	# Encourages exploration   
-    	default_Qvalue = 1.0
-    	state_key = board.make_key(mark)
+	@staticmethod
+	# Make a dictionary key for the current state (board + player turn)
+	# and if Q does not yet have it, add it to Q
+	def make_and_maybe_add_key(board, Q):
+		# Encourages exploration   
+		default_Qvalue = 1.0
+		state_key = board.state_of_board
 
-    	if Q.get(state_key) is None:
-    		moves = board.available_edges()
-    		# The available moves in each state are initially given a default value of zero
-    		Q[state_key] = {move: default_Qvalue for move in moves}
+		if Q.get(state_key) is None:
+			moves = board.available_edges()
+			# The available moves in each state are initially given a 
+			# default value of 1.0
+			Q[state_key] = {move: default_Qvalue for move in moves}
 
-    	return state_key
+		return state_key
 
-    @staticmethod
-    def stochastic_argminmax(Qs, min_or_max):       # Determines either the argmin or argmax of the array Qs such that if there are 'ties', one is chosen at random
-        min_or_maxQ = min_or_max(list(Qs.values()))
-        if list(Qs.values()).count(min_or_maxQ) > 1:      # If there is more than one move corresponding to the maximum Q-value, choose one at random
-            best_options = [move for move in list(Qs.keys()) if Qs[move] == min_or_maxQ]
-            move = best_options[np.random.choice(len(best_options))]
-        else:
-            move = min_or_max(Qs, key=Qs.get)
-        return move
+	@staticmethod
+	def stochastic_argminmax(Qs, min_or_max):
+		# Determines either the argmin or argmax of the array 
+		# Qs such that if there are 'ties', one is chosen at random
+		extreme_Q = min_or_max(list(Qs.values()))
+		# If there is more than one move corresponding to the maximum 
+		# Q-value, choose one at random
+		if list(Qs.values()).count(extreme_Q) > 1:      
+			best_options = [move for move in list(Qs.keys()) if Qs[move] == extreme_Q]
+			move = best_options[np.random.choice(len(best_options))] # ?
+		else:
+			move = min_or_max(Qs, key=Qs.get)
+
+		return move
 
 if __name__ == '__main__':
 	mainw = tk.Tk()
